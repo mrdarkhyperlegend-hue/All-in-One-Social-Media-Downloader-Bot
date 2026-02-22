@@ -1,10 +1,12 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
-const axios = require('axios');
 const yts = require('yt-search');
+const ytdl = require('@distube/ytdl-core');
+const axios = require('axios');
+const fs = require('fs');
 
-async function startDownloaderBot() {
+async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('downloader_session');
     const { version } = await fetchLatestBaileysVersion();
 
@@ -13,7 +15,7 @@ async function startDownloaderBot() {
         auth: state,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: true,
-        browser: ["Downloader-Bot", "Chrome", "1.0.0"]
+        browser: ["Scraper-Bot", "Chrome", "1.0.0"]
     });
 
     conn.ev.on('creds.update', saveCreds);
@@ -21,66 +23,106 @@ async function startDownloaderBot() {
     conn.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
         if (qr) qrcode.generate(qr, { small: true });
+        
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) startDownloaderBot();
+            if (shouldReconnect) startBot();
         } else if (connection === 'open') {
             console.log("Downloader Bot සක්‍රීයයි! ✅");
         }
     });
 
     conn.ev.on('messages.upsert', async (chatUpdate) => {
-        try {
-            const msg = chatUpdate.messages[0];
-            if (!msg.message || msg.key.fromMe) return;
+        const msg = chatUpdate.messages[0];
+        if (!msg.message || msg.key.fromMe) return;
 
-            const from = msg.key.remoteJid;
-            const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
-            const args = text.split(' ');
-            const command = args[0].toLowerCase();
-            const query = args.slice(1).join(' ');
+        const from = msg.key.remoteJid;
+        const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
+        const args = text.split(' ');
+        const command = args[0].toLowerCase();
+        const query = args.slice(1).join(' ');
 
-            // --- 1. YouTube Song Download (.song) ---
-            if (command === '.song') {
-                if (!query) return conn.sendMessage(from, { text: "සින්දුවේ නම හෝ YouTube Link එකක් දෙන්න. 🎶" });
-                await conn.sendMessage(from, { text: "සොයමින් පවතිී... කරුණාකර රැඳී සිටින්න. 🔎" });
+        // --- 1. YouTube Downloader (.song) ---
+        if (command === '.song') {
+            if (!query) return conn.sendMessage(from, { text: "සින්දුවේ නම හෝ YouTube Link එකක් දෙන්න. 🎶" });
 
+            try {
                 const search = await yts(query);
                 const video = search.videos[0];
-                
-                // අපි මෙතනදී Free API එකක් පාවිච්චි කරනවා
-                let downUrl = `https://api.aggelos-007.xyz/api/ytdl?url=${video.url}&type=audio`;
-                
-                await conn.sendMessage(from, { 
-                    audio: { url: downUrl }, 
-                    mimetype: 'audio/mpeg',
-                    fileName: `${video.title}.mp3`
-                }, { quoted: msg });
-            }
+                if (!video) return conn.sendMessage(from, { text: "සින්දුව හමු වුණේ නැත. ❌" });
 
-            // --- 2. TikTok Download (.tt) ---
-            if (command === '.tt' || command === '.tiktok') {
-                if (!query.includes('tiktok.com')) return conn.sendMessage(from, { text: "කරුණාකර නිවැරදි TikTok Link එකක් ලබා දෙන්න." });
+                await conn.sendMessage(from, { 
+                    image: { url: video.thumbnail }, 
+                    caption: `*🎬 Title:* ${video.title}\n*⏳ Duration:* ${video.timestamp}\n\n*සින්දුව සකසමින් පවතී...* ⏳` 
+                }, { quoted: msg });
+
+                let requestOptions = {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.5',
+                        'Connection': 'keep-alive',
+                    }
+                };
+
+                if (fs.existsSync('./cookies.json')) {
+                    const cookieData = JSON.parse(fs.readFileSync('./cookies.json'));
+                    requestOptions.headers.cookie = cookieData.map(c => `${c.name}=${c.value}`).join('; ');
+                }
+
+                const stream = ytdl(video.url, {
+                    filter: 'audioonly',
+                    quality: 'highestaudio',
+                    requestOptions: requestOptions
+                });
+
+                const chunks = [];
+                for await (const chunk of stream) { chunks.push(chunk); }
+                const buffer = Buffer.concat(chunks);
+
+                await conn.sendMessage(from, { 
+                    audio: buffer, 
+                    mimetype: 'audio/mp4', 
+                    fileName: `${video.title}.mp3`,
+                    ptt: false
+                }, { quoted: msg });
+
+                await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
+
+            } catch (err) {
+                console.error("Song Error: ", err.message);
+                await conn.sendMessage(from, { text: "YouTube දෝෂයකි. කරුණාකර Cookies යාවත්කාලීන කරන්න හෝ පසුව උත්සාහ කරන්න. ❌" });
+            }
+        }
+
+        // --- 2. TikTok Downloader (.tiktok) ---
+        if (command === '.tiktok' || command === '.tt') {
+            if (!query) return conn.sendMessage(from, { text: "TikTok Link එක ලබා දෙන්න. 📲" });
+
+            try {
                 await conn.sendMessage(from, { react: { text: '⏳', key: msg.key } });
 
-                const res = await axios.get(`https://api.tiklydown.eu.org/api/download?url=${query}`);
-                const videoUrl = res.data.video.noWatermark;
+                const response = await axios.get(`https://api.vreden.my.id/api/tiktok?url=${encodeURIComponent(query)}`);
+                const result = response.data.result;
+                
+                if (!result) return conn.sendMessage(from, { text: "වීඩියෝව හමු වුණේ නැත. ❌" });
 
-                await conn.sendMessage(from, { video: { url: videoUrl }, caption: "මෙන්න ඔයාගේ TikTok වීඩියෝ එක! ✅" }, { quoted: msg });
+                const finalVideoUrl = result.video_no_watermark || result.video;
+
+                await conn.sendMessage(from, { 
+                    video: { url: finalVideoUrl }, 
+                    caption: `🎬 *TikTok Downloaded*\n\n*📝 Title:* ${result.title || 'No Title'}`,
+                    mimetype: 'video/mp4'
+                }, { quoted: msg });
+
+                await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
+
+            } catch (err) {
+                console.error("TikTok Error: ", err.message);
+                await conn.sendMessage(from, { text: "TikTok API දෝෂයකි. පසුව උත්සාහ කරන්න. ❌" });
             }
-
-            // --- 3. FB Download (.fb) ---
-            if (command === '.fb') {
-                if (!query) return conn.sendMessage(from, { text: "FB වීඩියෝ ලින්ක් එක ලබා දෙන්න." });
-                const res = await axios.get(`https://api.botcahx.eu.org/api/dowloader/fbdown?url=${query}&apikey=xyz`); // Free API
-                await conn.sendMessage(from, { video: { url: res.data.result.url }, caption: "FB Video Downloaded! ✅" });
-            }
-
-        } catch (e) {
-            console.log(e);
-            // conn.sendMessage(from, { text: "Error එකක් ආවා. පසුව උත්සාහ කරන්න. ❌" });
         }
     });
 }
 
-startDownloaderBot();
+startBot();
