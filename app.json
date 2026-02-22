@@ -1,0 +1,27 @@
+{
+  "name": "WhatsApp-Voice-Bot",
+  "description": "WhatsApp Downloader and Voice Bot",
+  "repository": "https://github.com/mrdarkhyperlegend-hue/All-in-One-Social-Media-Downloader-Bot",
+  "logo": "https://telegra.ph/file/79510134f5d9f041e6c4a.jpg",
+  "keywords": ["whatsapp", "bot", "nodejs", "heroku"],
+  "env": {
+    "SESSION_ID": {
+      "description": "ඔයාගේ Session ID එක මෙතනට දෙන්න.",
+      "required": true
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/nodejs"
+    },
+    {
+      "url": "https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest"
+    }
+  ],
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  }
+}
