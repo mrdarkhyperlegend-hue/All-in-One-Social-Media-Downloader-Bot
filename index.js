@@ -1,13 +1,32 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
+const Baileys = require("@whiskeysockets/baileys");
+const { 
+    default: makeWASocket, 
+    DisconnectReason, 
+    fetchLatestBaileysVersion, 
+    generateForwardMessageContent, 
+    generateWAMessageFromContent 
+} = Baileys;
+
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
-const yts = require('yt-search');
-const ytdl = require('@distube/ytdl-core');
-const axios = require('axios');
 const fs = require('fs');
+const mongoose = require("mongoose");
+const { useMongoDBAuthState } = require("baileys-mongodb-library");
+
+// 1. MongoDB Connection URL
+const mongoURI = process.env.MONGODB_URI || "mongodb+srv://Suneth:SK_154712@cluster0.gbihtt6.mongodb.net/?appName=Cluster0";
+
+const makeInMemoryStore = Baileys.makeInMemoryStore || (Baileys.default && Baileys.default.makeInMemoryStore);
+const store = makeInMemoryStore ? makeInMemoryStore({ logger: pino({ level: 'silent' }) }) : null;
+
+const warnCount = {};
 
 async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState('downloader_session');
+    // MongoDB සම්බන්ධ කිරීම
+    await mongoose.connect(mongoURI);
+    console.log("MongoDB සම්බන්ධ වුණා! 📦");
+
+    const { state, saveCreds } = await useMongoDBAuthState(mongoose.connection.collection("session"));
     const { version } = await fetchLatestBaileysVersion();
 
     const conn = makeWASocket({
@@ -15,8 +34,22 @@ async function startBot() {
         auth: state,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: true,
-        browser: ["Scraper-Bot", "Chrome", "1.0.0"]
+        browser: ["Chrome", "Windows", "10.0.0"]
     });
+
+    if (store) store.bind(conn.ev);
+
+    // Forwarding function (Status download කිරීමට අවශ්‍ය වේ)
+    conn.copyNForward = async (jid, message, forceForward = false, options = {}) => {
+        let content = await generateForwardMessageContent(message, forceForward)
+        let ctype = Object.keys(content)[0]
+        let context = {}
+        if (Object.keys(message.message)[0] != "conversation") context = message.message[Object.keys(message.message)[0]].contextInfo
+        content[ctype].contextInfo = { ...context, ...content[ctype].contextInfo }
+        const waMessage = await generateWAMessageFromContent(jid, content, options ? { ...options, ...context, userJid: conn.user.id } : {})
+        await conn.relayMessage(jid, waMessage.message, { messageId: waMessage.key.id })
+        return waMessage
+    }
 
     conn.ev.on('creds.update', saveCreds);
 
@@ -28,99 +61,40 @@ async function startBot() {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) startBot();
         } else if (connection === 'open') {
-            console.log("Downloader Bot සක්‍රීයයි! ✅");
+            console.log("බොට් සාර්ථකව සම්බන්ධ විය! ✅");
         }
     });
 
     conn.ev.on('messages.upsert', async (chatUpdate) => {
-        const msg = chatUpdate.messages[0];
-        if (!msg.message || msg.key.fromMe) return;
+        try {
+            const msg = chatUpdate.messages[0];
+            if (!msg.message || msg.key.fromMe) return; 
 
-        const from = msg.key.remoteJid;
-        const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
-        const args = text.split(' ');
-        const command = args[0].toLowerCase();
-        const query = args.slice(1).join(' ');
+            const from = msg.key.remoteJid;
+            const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").toLowerCase().trim();
 
-        // --- 1. YouTube Downloader (.song) ---
-        if (command === '.song') {
-            if (!query) return conn.sendMessage(from, { text: "සින්දුවේ නම හෝ YouTube Link එකක් දෙන්න. 🎶" });
+            // A. Auto Status Seen & Download (ඔබේ නම්බර් එකට ලැබෙනු ඇත)
+            if (from === 'status@broadcast') {
+                await conn.readMessages([msg.key]);
+                await conn.copyNForward(conn.user.id, msg, true);
+                return;
+            }
 
-            try {
-                const search = await yts(query);
-                const video = search.videos[0];
-                if (!video) return conn.sendMessage(from, { text: "සින්දුව හමු වුණේ නැත. ❌" });
-
-                await conn.sendMessage(from, { 
-                    image: { url: video.thumbnail }, 
-                    caption: `*🎬 Title:* ${video.title}\n*⏳ Duration:* ${video.timestamp}\n\n*සින්දුව සකසමින් පවතී...* ⏳` 
-                }, { quoted: msg });
-
-                let requestOptions = {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                        'Accept-Language': 'en-US,en;q=0.5',
-                        'Connection': 'keep-alive',
-                    }
-                };
-
-                if (fs.existsSync('./cookies.json')) {
-                    const cookieData = JSON.parse(fs.readFileSync('./cookies.json'));
-                    requestOptions.headers.cookie = cookieData.map(c => `${c.name}=${c.value}`).join('; ');
+            // B. Anti-Badwords (නරක වචන පාලනය)
+            const badWords = ['හුත්ත', 'පයිය', 'කැරියා', 'පොන්නයා', 'වේසි', 'හුකන', 'පකය'];
+            if (badWords.some(word => text.includes(word))) {
+                warnCount[from] = (warnCount[from] || 0) + 1;
+                if (warnCount[from] >= 3) {
+                    await conn.sendMessage(from, { text: "❌ *ඔබව Block කරන ලදී!*" });
+                    await conn.updateBlockStatus(from, "block");
+                } else {
+                    await conn.sendMessage(from, { text: `⚠️ *අවවාදයයි!* නරක වචන පාවිච්චි කිරීමෙන් වළකින්න. (${warnCount[from]}/3)` });
                 }
-
-                const stream = ytdl(video.url, {
-                    filter: 'audioonly',
-                    quality: 'highestaudio',
-                    requestOptions: requestOptions
-                });
-
-                const chunks = [];
-                for await (const chunk of stream) { chunks.push(chunk); }
-                const buffer = Buffer.concat(chunks);
-
-                await conn.sendMessage(from, { 
-                    audio: buffer, 
-                    mimetype: 'audio/mp4', 
-                    fileName: `${video.title}.mp3`,
-                    ptt: false
-                }, { quoted: msg });
-
-                await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
-
-            } catch (err) {
-                console.error("Song Error: ", err.message);
-                await conn.sendMessage(from, { text: "YouTube දෝෂයකි. කරුණාකර Cookies යාවත්කාලීන කරන්න හෝ පසුව උත්සාහ කරන්න. ❌" });
+                return;
             }
-        }
 
-        // --- 2. TikTok Downloader (.tiktok) ---
-        if (command === '.tiktok' || command === '.tt') {
-            if (!query) return conn.sendMessage(from, { text: "TikTok Link එක ලබා දෙන්න. 📲" });
-
-            try {
-                await conn.sendMessage(from, { react: { text: '⏳', key: msg.key } });
-
-                const response = await axios.get(`https://api.vreden.my.id/api/tiktok?url=${encodeURIComponent(query)}`);
-                const result = response.data.result;
-                
-                if (!result) return conn.sendMessage(from, { text: "වීඩියෝව හමු වුණේ නැත. ❌" });
-
-                const finalVideoUrl = result.video_no_watermark || result.video;
-
-                await conn.sendMessage(from, { 
-                    video: { url: finalVideoUrl }, 
-                    caption: `🎬 *TikTok Downloaded*\n\n*📝 Title:* ${result.title || 'No Title'}`,
-                    mimetype: 'video/mp4'
-                }, { quoted: msg });
-
-                await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
-
-            } catch (err) {
-                console.error("TikTok Error: ", err.message);
-                await conn.sendMessage(from, { text: "TikTok API දෝෂයකි. පසුව උත්සාහ කරන්න. ❌" });
-            }
+        } catch (err) {
+            console.log("Error: " + err);
         }
     });
 }
