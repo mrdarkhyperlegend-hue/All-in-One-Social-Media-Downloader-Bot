@@ -8,7 +8,6 @@ async function handleCommands(sock, msg) {
     const args = body.trim().split(/ +/).slice(1);
     const command = body.trim().split(/ +/)[0].toLowerCase();
 
-    // පොදු ඩවුන්ලෝඩර් Logic එක (YT, FB, TikTok සඳහා)
     if (command === '.video' || command === '.song' || command === '.tt' || command === '.fb') {
         let query = args.join(" ");
         if (!query) return sock.sendMessage(from, { text: 'කරුණාකර නමක් හෝ ලින්ක් එකක් ලබා දෙන්න.' });
@@ -17,7 +16,7 @@ async function handleCommands(sock, msg) {
             let downloadUrl = query;
             let title = "Social Media Video";
 
-            // YouTube නම් search කරලා ලින්ක් එක ගන්නවා
+            
             if (command === '.video' || command === '.song') {
                 const search = await yts(query);
                 const video = search.videos[0];
@@ -31,9 +30,7 @@ async function handleCommands(sock, msg) {
             const isAudio = command === '.song';
             const fileName = `./temp_${Date.now()}.${isAudio ? 'mp3' : 'mp4'}`;
             
-            // yt-dlp command එක
-            // Audio නම්: -x --audio-format mp3
-            // Video නම්: -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+            
             const cmd = isAudio 
                 ? `yt-dlp -x --audio-format mp3 --no-playlist "${downloadUrl}" -o "${fileName}"`
                 : `yt-dlp -f "b[ext=mp4]" --no-playlist "${downloadUrl}" -o "${fileName}"`;
@@ -47,7 +44,7 @@ async function handleCommands(sock, msg) {
                 const stats = fs.statSync(fileName);
                 const sizeMB = stats.size / (1024 * 1024);
 
-                // 200MB ට වැඩි නම් Document විදිහට යැවීම
+               
                 if (sizeMB > 200) {
                     await sock.sendMessage(from, { 
                         document: { url: fileName }, 
@@ -62,7 +59,6 @@ async function handleCommands(sock, msg) {
                     }
                 }
 
-                // Temp file එක මැකීම
                 if (fs.existsSync(fileName)) fs.unlinkSync(fileName);
             });
 
