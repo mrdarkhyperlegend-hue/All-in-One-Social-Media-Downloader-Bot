@@ -1,102 +1,49 @@
-const Baileys = require("@whiskeysockets/baileys");
 const { 
     default: makeWASocket, 
+    useMultiFileAuthState, 
     DisconnectReason, 
-    fetchLatestBaileysVersion, 
-    generateForwardMessageContent, 
-    generateWAMessageFromContent 
-} = Baileys;
-
+    fetchLatestBaileysVersion 
+} = require('@whiskeysockets/baileys');
+const { Boom } = require('@hapi/boom');
+const { handleCommands } = require('./bot');
 const pino = require('pino');
-const qrcode = require('qrcode-terminal');
-const fs = require('fs');
-const mongoose = require("mongoose");
-const { useMongoDBAuthState } = require("baileys-mongodb-library");
 
-// 1. MongoDB Connection URL
-const mongoURI = process.env.MONGODB_URI || "mongodb+srv://Suneth:SK_154712@cluster0.gbihtt6.mongodb.net/?appName=Cluster0";
-
-const makeInMemoryStore = Baileys.makeInMemoryStore || (Baileys.default && Baileys.default.makeInMemoryStore);
-const store = makeInMemoryStore ? makeInMemoryStore({ logger: pino({ level: 'silent' }) }) : null;
-
-const warnCount = {};
-
-async function startBot() {
-    // MongoDB සම්බන්ධ කිරීම
-    await mongoose.connect(mongoURI);
-    console.log("MongoDB සම්බන්ධ වුණා! 📦");
-
-    const { state, saveCreds } = await useMongoDBAuthState(mongoose.connection.collection("session"));
+async function connectToWhatsApp() {
+    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
 
-    const conn = makeWASocket({
-        version,
+    const sock = makeWASocket({
         auth: state,
-        logger: pino({ level: 'silent' }),
+        version,
         printQRInTerminal: true,
-        browser: ["Chrome", "Windows", "10.0.0"]
+        logger: pino({ level: 'silent' }),
+        browser: ['Dl-Bot', 'Chrome', '1.0.0'],
+        syncFullHistory: false, // 
+        markOnlineOnConnect: true
     });
 
-    if (store) store.bind(conn.ev);
+    sock.ev.on('creds.update', saveCreds);
 
-    // Forwarding function (Status download කිරීමට අවශ්‍ය වේ)
-    conn.copyNForward = async (jid, message, forceForward = false, options = {}) => {
-        let content = await generateForwardMessageContent(message, forceForward)
-        let ctype = Object.keys(content)[0]
-        let context = {}
-        if (Object.keys(message.message)[0] != "conversation") context = message.message[Object.keys(message.message)[0]].contextInfo
-        content[ctype].contextInfo = { ...context, ...content[ctype].contextInfo }
-        const waMessage = await generateWAMessageFromContent(jid, content, options ? { ...options, ...context, userJid: conn.user.id } : {})
-        await conn.relayMessage(jid, waMessage.message, { messageId: waMessage.key.id })
-        return waMessage
-    }
-
-    conn.ev.on('creds.update', saveCreds);
-
-    conn.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        if (qr) qrcode.generate(qr, { small: true });
-        
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
         if (connection === 'close') {
-            const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) startBot();
+            const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+            if (shouldReconnect) connectToWhatsApp();
         } else if (connection === 'open') {
-            console.log("බොට් සාර්ථකව සම්බන්ධ විය! ✅");
+            console.log('✅ Dl-Bot සක්‍රියයි (Groups අක්‍රිය කර ඇත)');
         }
     });
 
-    conn.ev.on('messages.upsert', async (chatUpdate) => {
-        try {
-            const msg = chatUpdate.messages[0];
-            if (!msg.message || msg.key.fromMe) return; 
+    sock.ev.on('messages.upsert', async m => {
+        const msg = m.messages[0];
+        if (!msg.message || msg.key.fromMe) return;
 
-            const from = msg.key.remoteJid;
-            const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").toLowerCase().trim();
+       
+        const from = msg.key.remoteJid;
+        if (from.endsWith('@g.us')) return; 
 
-            // A. Auto Status Seen & Download (ඔබේ නම්බර් එකට ලැබෙනු ඇත)
-            if (from === 'status@broadcast') {
-                await conn.readMessages([msg.key]);
-                await conn.copyNForward(conn.user.id, msg, true);
-                return;
-            }
-
-            // B. Anti-Badwords (නරක වචන පාලනය)
-            const badWords = ['හුත්ත', 'පයිය', 'කැරියා', 'පොන්නයා', 'වේසි', 'හුකන', 'පකය'];
-            if (badWords.some(word => text.includes(word))) {
-                warnCount[from] = (warnCount[from] || 0) + 1;
-                if (warnCount[from] >= 3) {
-                    await conn.sendMessage(from, { text: "❌ *ඔබව Block කරන ලදී!*" });
-                    await conn.updateBlockStatus(from, "block");
-                } else {
-                    await conn.sendMessage(from, { text: `⚠️ *අවවාදයයි!* නරක වචන පාවිච්චි කිරීමෙන් වළකින්න. (${warnCount[from]}/3)` });
-                }
-                return;
-            }
-
-        } catch (err) {
-            console.log("Error: " + err);
-        }
+        await handleCommands(sock, msg);
     });
 }
 
-startBot();
+connectToWhatsApp();
