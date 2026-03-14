@@ -7,6 +7,10 @@ const {
 const { Boom } = require('@hapi/boom');
 const { handleCommands } = require('./bot');
 const pino = require('pino');
+const { exec } = require('child_process');
+
+// --- ඔයාගේ නම්බර් එක මෙතනට දෙන්න ---
+const ownerNumber = '947xxxxxxxx@s.whatsapp.net'; 
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
@@ -18,7 +22,7 @@ async function connectToWhatsApp() {
         printQRInTerminal: true,
         logger: pino({ level: 'silent' }),
         browser: ['Dl-Bot', 'Chrome', '1.0.0'],
-        syncFullHistory: false, // 
+        syncFullHistory: false, 
         markOnlineOnConnect: true
     });
 
@@ -30,17 +34,34 @@ async function connectToWhatsApp() {
             const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) connectToWhatsApp();
         } else if (connection === 'open') {
-            console.log('✅ Dl-Bot සක්‍රියයි (Groups අක්‍රිය කර ඇත)');
+            console.log('✅ Dl-Bot Ready! (Self-response enabled)');
         }
     });
 
     sock.ev.on('messages.upsert', async m => {
         const msg = m.messages[0];
-        if (!msg.message || msg.key.fromMe) return;
+        if (!msg.message) return;
 
-       
         const from = msg.key.remoteJid;
+        const body = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
+        const isCmd = body.startsWith('.');
+
+      
+        if (msg.key.fromMe && !isCmd) return;
+
+        // Inbox Only Check
         if (from.endsWith('@g.us')) return; 
+
+        // Auto Update (Owner Only)
+        if (body.toLowerCase() === '.update') {
+            if (from !== ownerNumber && !msg.key.fromMe) return sock.sendMessage(from, { text: '❌ Owner Only!' });
+            await sock.sendMessage(from, { text: '🚀 Updating...' });
+            exec('git pull', (err, stdout) => {
+                if (err) return sock.sendMessage(from, { text: `Error: ${err.message}` });
+                sock.sendMessage(from, { text: `✅ Updated!\n${stdout}` }).then(() => process.exit());
+            });
+            return;
+        }
 
         await handleCommands(sock, msg);
     });
