@@ -9,11 +9,11 @@ async function handleCommands(sock, msg) {
     const args = body.trim().split(/ +/).slice(1);
     const command = body.trim().split(/ +/)[0].toLowerCase();
 
-    // කාලය සහ දිනය ලබා ගැනීම
+  
     const time = new Date().toLocaleTimeString('si-LK', { hour12: true });
     const date = new Date().toLocaleDateString('si-LK');
 
-    // --- .menu Command ---
+    
     if (command === '.menu' || command === '.help' || command === '.start') {
         const menuText = `
 ╭━━━━❰ *ᴅʟ-ʙᴏᴛ* ❱━━━━╮
@@ -39,15 +39,15 @@ async function handleCommands(sock, msg) {
 ╰━━━━━━━━━━━━━━━━━━━━━━━╯
    *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴅꜱ ꜱᴜɴᴇᴛʜ*`;
 
-        // මෙනු එක ලස්සන රූපයක් සමඟ යවන්න ඕනෙ නම් මෙතන url එකක් දෙන්න
+    
         await sock.sendMessage(from, { 
             text: menuText,
             contextInfo: {
                 externalAdReply: {
                     title: "ᴀʟʟ-ɪɴ-ᴏɴᴇ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ",
                     body: "ᴅᴇᴠᴇʟᴏᴘᴇᴅ ʙʏ ᴅꜱ ꜱᴜɴᴇᴛʜ",
-                    thumbnailUrl: "https://image2url.com/r2/default/images/1773458687341-05d121cd-0f69-4a53-a4b7-e6dcf0990f80.png", // මෙතනට ඔයාගේ ලොගෝ එකක් දාන්න
-                    sourceUrl: "https://github.com/mrdarkhyperlegend-hue/", // ඔයාගේ GitHub ලින්ක් එක
+                    thumbnailUrl: "https://image2url.com/r2/default/images/1773458687341-05d121cd-0f69-4a53-a4b7-e6dcf0990f80.png", 
+                    sourceUrl: "https://github.com/mrdarkhyperlegend-hue/", 
                     mediaType: 1,
                     renderLargerThumbnail: true
                 }
