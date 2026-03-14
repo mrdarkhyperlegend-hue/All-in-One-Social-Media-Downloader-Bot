@@ -4,10 +4,58 @@ const { exec } = require('child_process');
 
 async function handleCommands(sock, msg) {
     const from = msg.key.remoteJid;
+    const pushName = msg.pushName || "User";
     const body = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
     const args = body.trim().split(/ +/).slice(1);
     const command = body.trim().split(/ +/)[0].toLowerCase();
 
+    // කාලය සහ දිනය ලබා ගැනීම
+    const time = new Date().toLocaleTimeString('si-LK', { hour12: true });
+    const date = new Date().toLocaleDateString('si-LK');
+
+    // --- .menu Command ---
+    if (command === '.menu' || command === '.help' || command === '.start') {
+        const menuText = `
+╭━━━━❰ *ᴅʟ-ʙᴏᴛ* ❱━━━━╮
+┃ 
+┃ 👤 *User:* ${pushName}
+┃ 📅 *Date:* ${date}
+┃ 🕒 *Time:* ${time}
+┃ 🛠️ *Prefix:* [ . ]
+┃ 🏢 *Owner:* ᴅꜱ ꜱᴜɴᴇᴛʜ
+┃
+┣━━━❰ *ᴅᴏᴡɴʟᴏᴀᴅᴇʀꜱ* ❱━━━━
+┃
+┃ 📥 *.video* - YouTube Video
+┃ 🎵 *.song* - YouTube Audio
+┃ 🎬 *.fb* - Facebook Video
+┃ 📱 *.tt* - TikTok Video
+┃
+┣━━━❰ *ꜱʏꜱᴛᴇම* ❱━━━━━━━
+┃
+┃ 🔄 *.update* - Sync with GitHub
+┃ ℹ️ *.menu* - Show this list
+┃
+╰━━━━━━━━━━━━━━━━━━━━━━━╯
+   *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴅꜱ ꜱᴜɴᴇᴛʜ*`;
+
+        // මෙනු එක ලස්සන රූපයක් සමඟ යවන්න ඕනෙ නම් මෙතන url එකක් දෙන්න
+        await sock.sendMessage(from, { 
+            text: menuText,
+            contextInfo: {
+                externalAdReply: {
+                    title: "ᴀʟʟ-ɪɴ-ᴏɴᴇ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ",
+                    body: "ᴅᴇᴠᴇʟᴏᴘᴇᴅ ʙʏ ᴅꜱ ꜱᴜɴᴇᴛʜ",
+                    thumbnailUrl: "https://image2url.com/r2/default/images/1773458687341-05d121cd-0f69-4a53-a4b7-e6dcf0990f80.png", // මෙතනට ඔයාගේ ලොගෝ එකක් දාන්න
+                    sourceUrl: "https://github.com/mrdarkhyperlegend-hue/", // ඔයාගේ GitHub ලින්ක් එක
+                    mediaType: 1,
+                    renderLargerThumbnail: true
+                }
+            }
+        }, { quoted: msg });
+    }
+
+    // --- ඩවුන්ලෝඩර් Commands (YouTube, FB, TikTok) ---
     if (command === '.video' || command === '.song' || command === '.tt' || command === '.fb') {
         let query = args.join(" ");
         if (!query) return sock.sendMessage(from, { text: 'කරුණාකර නමක් හෝ ලින්ක් එකක් ලබා දෙන්න.' });
