@@ -8,10 +8,8 @@ const { Boom } = require('@hapi/boom');
 const { handleCommands } = require('./bot');
 const pino = require('pino');
 const { exec } = require('child_process');
-
-// --- ඔයාගේ නම්බර් එක මෙතනට දෙන්න ---
-const ownerNumber = '947xxxxxxxx@s.whatsapp.net'; 
-
+const ownerNumber = '947xxxxxxxx@s.whatsapp.net'; //fucking work  ( con to update cmd and dont fuck me ) 
+// pako thoge nb ek othenda dapan itapasse update cmd ek wada change krnne nathuwa mage inbox haminenna hadnn epa besikayo 😒
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
